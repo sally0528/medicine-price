@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>醫院藥品查價系統 & 數據分析</title>
+    <style>
+        body { font-family: 'Microsoft JhengHei', sans-serif; padding: 20px; background-color: #f4f7f6; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 25px; }
+        h2 { color: #2c3e50; text-align: center; margin-bottom: 20px; }
+        
+        .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; }
+        button { padding: 10px 25px; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        button:hover { background-color: #219150; }
+
+        #results { margin-top: 15px; min-height: 50px; }
+        .med-card { border-left: 6px solid #27ae60; padding: 20px; margin-bottom: 15px; background: #fafafa; border-radius: 4px; position: relative; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        
+        .dose-tag { font-weight: bold; font-size: 1.1em; }
+
+        .price-row { display: flex; gap: 30px; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; }
+        .price-item { flex: 1; }
+        .price-label { font-size: 13px; color: #7f8c8d; display: block; }
+        .price-value { font-weight: bold; font-size: 24px; }
+        .old-price { color: #34495e; }
+        .new-price { color: #e74c3c; }
+        
+        .status-active { color: #27ae60; font-weight: bold; font-size: 12px; }
+        .status-expired { color: #95a5a6; font-size: 12px; }
+        .status-upcoming { color: #e67e22; font-size: 12px; }
+
+        .med-name { font-weight: bold; color: #333; font-size: 18px; margin-bottom: 10px; line-height: 1.4; }
+        .med-info { color: #666; font-size: 14px; line-height: 1.8; }
+        
+        .dashboard-wrapper { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; }
+        .dashboard-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        
+        .loading-text { text-align: center; color: #7f8c8d; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>藥品快速查價系統</h2>
+    <div class="search-box">
+        <input type="text" id="searchInput" placeholder="請輸入藥品名稱或健保代碼..." onkeypress="if(event.keyCode==13) searchMed()">
+        <button onclick="searchMed()">搜尋</button>
+    </div>
+    <div id="results"></div>
+</div>
+
+<div class="container">
+    <h2>藥品資訊儀表板</h2>
+    <div class="dashboard-wrapper">
+        <iframe title="藥品價格異動分析" 
+                src="https://app.powerbi.com/view?r=eyJrIjoiMjFmNGUzOTktOGM1YS00MTUyLWJkMjUtZDU2OTlkZTk2YjFiIiwidCI6ImExMmQ5NGFkLTk0YjktNGRhNi05ZTk1LThhYzdmZThiM2IwMCIsImMiOjEwfQ%3D%3D" 
+                frameborder="0" allowFullScreen="true">
+        </iframe>
+    </div>
+</div>
+
+<script>
+    let medicineData = []; // 用於存儲從 JSON 載入的資料
+
+    // 1. 初始化：載入本地 JSON 資料
+    async function initData() {
+        const container = document.getElementById('results');
+        container.innerHTML = '<div class="loading-text">正在同步藥品資料庫...</div>';
+        
+        try {
+            const response = await fetch('data.json');
+            medicineData = await response.json();
+            container.innerHTML = '<div class="loading-text" style="color: #27ae60;"></div>';
+        } catch (error) {
+            container.innerHTML = '<div class="loading-text" style="color: #e74c3c;">❌ 無法載入資料 (data.json)，請確認檔案是否存在。</div>';
+        }
+    }
+
+    // 2. 顏色分配函數
+    function getDoseColor(doseVal) {
+        const colors = ['#007bff', '#e67e22', '#27ae60', '#9b59b6', '#f1c40f', '#e74c3c', '#1abc9c', '#34495e'];
+        const index = parseInt(doseVal) % colors.length;
+        return colors[index];
+    }
+
+    // 3. 高亮劑量字眼
+    function highlightDose(name) {
+        if (!name) return '未知藥名';
+        return name.replace(/(\d+)\s*(mg|MG|mg\/mL|MG\/mL)/gi, (match, p1) => {
+            const color = getDoseColor(p1);
+            return `<span class="dose-tag" style="color: ${color};">${match}</span>`;
+        });
+    }
+
+    // 4. 搜尋邏輯 (直接過濾陣列)
+    function searchMed() {
+        const query = document.getElementById('searchInput').value.trim().toUpperCase();
+        const container = document.getElementById('results');
+        
+        if (!query) return alert("請輸入藥品關鍵字");
+        if (medicineData.length === 0) return alert("資料庫尚未準備好，請稍候。");
+
+        // 搜尋範圍：包含藥品名稱(Unnamed: 3) 或 健保代碼(Unnamed: 2)
+        const results = medicineData.filter(item => {
+            const name = (item['Unnamed: 3'] || "").toUpperCase();
+            const code = (item['Unnamed: 2'] || "").toString().toUpperCase();
+            return name.includes(query) || code.includes(query);
+        });
+
+        if (results.length === 0) {
+            container.innerHTML = `<div style="text-align:center;">❌ 找不到與「${query}」相關的藥品</div>`;
+            return;
+        }
+
+        const today = new Date();
+
+        container.innerHTML = results.map(item => {
+            const oldPrice = item['Unnamed: 8'] || '--';
+            const newPrice = item['Unnamed: 9'] || '--';
+            const effectDateStr = item['Unnamed: 10'] || '';
+            const highlightedName = highlightDose(item['Unnamed: 3']);
+
+            let isEffective = false;
+            if (effectDateStr) {
+                const parts = effectDateStr.split('/');
+                const westernYear = parseInt(parts[0]) + 1911;
+                const effectDate = new Date(westernYear, parseInt(parts[1]) - 1, parseInt(parts[2]));
+                if (today >= effectDate) isEffective = true;
+            }
+
+            const oldPriceStatus = isEffective ? '<span class="status-expired">已失效</span>' : '<span class="status-active">生效中</span>';
+            const newPriceStatus = isEffective ? '<span class="status-active">生效中</span>' : `<span class="status-upcoming">預計生效日：${effectDateStr}</span>`;
+
+            return `
+                <div class="med-card">
+                    <div class="med-name">${highlightedName}</div>
+                    <div class="med-info">
+                        健保代碼：${item['Unnamed: 2']} <br>
+                        廠牌：${item['Unnamed: 4'] || '未註明'} <br>
+                        成分及含量：${item['Unnamed: 5'] || '未註明'}
+                    </div>
+
+                    <div class="price-row">
+                        <div class="price-item">
+                            <span class="price-label">原核定價</span>
+                            <span class="price-value old-price">$${oldPrice}</span>
+                            ${oldPriceStatus}
+                        </div>
+                        <div class="price-item">
+                            <span class="price-label">新核定價</span>
+                            <span class="price-value new-price">$${newPrice}</span>
+                            ${newPriceStatus}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // 啟動載入
+    window.onload = initData;
+</script>
+
+</body>
+</html>
